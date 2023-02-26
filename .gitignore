@@ -1,4 +1,5 @@
 # compilation and distribution
+training_dir
 __pycache__
 _ext
 *.pyc

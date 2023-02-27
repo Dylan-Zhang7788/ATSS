@@ -190,7 +190,7 @@ def make_anchor_generator_atss(config):
     anchor_generator = AnchorGenerator(
         tuple(new_anchor_sizes), aspect_ratios, anchor_strides, straddle_thresh) 
     # new_anchor_sizes=[(64.0,),(128.0,),(256.0,),(512.0,),(1024.0,)]
-    # aspect_ratios=(1.0) anchor_strides=(8,16,32,64,128) straddle_thresh= 0
+    # aspect_ratios=(0.5,1.0,2.0) anchor_strides=(8,16,32,64,128) straddle_thresh= 0
     return anchor_generator
 
 # Copyright (c) 2017-present, Facebook, Inc.

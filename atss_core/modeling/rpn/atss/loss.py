@@ -133,6 +133,7 @@ class ATSSLossComputation(object):
                 num_anchors_per_loc = len(self.cfg.MODEL.ATSS.ASPECT_RATIOS) * self.cfg.MODEL.ATSS.SCALES_PER_OCTAVE
 
                 num_anchors_per_level = [len(anchors_per_level.bbox) for anchors_per_level in anchors[im_i]]
+                # ious 的形状是 [N,M] N是anchor的总数目，M是真值的总数目
                 ious = boxlist_iou(anchors_per_im, targets_per_im)
 
                 gt_cx = (bboxes_per_im[:, 2] + bboxes_per_im[:, 0]) / 2.0
@@ -142,52 +143,78 @@ class ATSSLossComputation(object):
                 anchors_cx_per_im = (anchors_per_im.bbox[:, 2] + anchors_per_im.bbox[:, 0]) / 2.0
                 anchors_cy_per_im = (anchors_per_im.bbox[:, 3] + anchors_per_im.bbox[:, 1]) / 2.0
                 anchor_points = torch.stack((anchors_cx_per_im, anchors_cy_per_im), dim=1)
-
+                # distances的形状也是 [N,M] N是anchor的总数目，M是真值的总数目
                 distances = (anchor_points[:, None, :] - gt_points[None, :, :]).pow(2).sum(-1).sqrt()
 
                 # Selecting candidates based on the center distance between anchor box and object
                 candidate_idxs = []
+                # 为anchor分配索引
                 star_idx = 0
                 for level, anchors_per_level in enumerate(anchors[im_i]):
                     end_idx = star_idx + num_anchors_per_level[level]
+                    # 将每一个level上的距离取出
                     distances_per_level = distances[star_idx:end_idx, :]
                     topk = min(self.cfg.MODEL.ATSS.TOPK * num_anchors_per_loc, num_anchors_per_level[level])
+                    # 取出单个level上于每个真值距离值最小的9*3个anchor的索引，注意 每个真值，都取9*3个anchor
                     _, topk_idxs_per_level = distances_per_level.topk(topk, dim=0, largest=False)
+                    # 加上该level的初始索引 就得到了这9个anchor的绝对索引
                     candidate_idxs.append(topk_idxs_per_level + star_idx)
                     star_idx = end_idx
+                # 将各个level上的anchor的索引连接起来
+                # candidate_idxs的形状是 [5*27,M] 5*27是5层每一层选3*9个框，M是真值的总数目
+                # 注意，不同真值对应的索引可能是同一个！！！！！！！
+                # 并且不同的真值 对应的索引的范围 也是相同的！！！！！！！！！
                 candidate_idxs = torch.cat(candidate_idxs, dim=0)
 
                 # Using the sum of mean and standard deviation as the IoU threshold to select final positive samples
+                # 根据anchor的索引，提取出这几个anchor与对应真值的IOU
+                # candidate_ious的shape是[N2,M] N2是根据距离筛选剩下的anchor的数目，M是真值的数目
                 candidate_ious = ious[candidate_idxs, torch.arange(num_gt)]
                 iou_mean_per_gt = candidate_ious.mean(0)
                 iou_std_per_gt = candidate_ious.std(0)
+                # mean 和 std 的shape都是[M]一维数组，M是真值数目
                 iou_thresh_per_gt = iou_mean_per_gt + iou_std_per_gt
+                # iou_thresh_per_gt[None, :] 的shape是[1,M]
+                # anchor中 与某个gt的iou大于阈值的，才是该真值对应的正样本
                 is_pos = candidate_ious >= iou_thresh_per_gt[None, :]
 
                 # Limiting the final positive samples’ center to object
+                # anchor_num 是anchor的总数目 比如每个点有三个anchor 那anchor_num就是所有level总网格点数目的三倍
                 anchor_num = anchors_cx_per_im.shape[0]
                 for ng in range(num_gt): 
+                    # 这里做的目的是后续把candidate_idxs展平，跟之前的candidate_idxs对照就可以知道原理
                     candidate_idxs[:, ng] += ng * anchor_num
                 e_anchors_cx = anchors_cx_per_im.view(1, -1).expand(num_gt, anchor_num).contiguous().view(-1)
                 e_anchors_cy = anchors_cy_per_im.view(1, -1).expand(num_gt, anchor_num).contiguous().view(-1)
+                # 这里把candidate_idxs展平了
                 candidate_idxs = candidate_idxs.view(-1)
                 l = e_anchors_cx[candidate_idxs].view(-1, num_gt) - bboxes_per_im[:, 0]
                 t = e_anchors_cy[candidate_idxs].view(-1, num_gt) - bboxes_per_im[:, 1]
                 r = bboxes_per_im[:, 2] - e_anchors_cx[candidate_idxs].view(-1, num_gt)
                 b = bboxes_per_im[:, 3] - e_anchors_cy[candidate_idxs].view(-1, num_gt)
                 is_in_gts = torch.stack([l, t, r, b], dim=1).min(dim=1)[0] > 0.01
+                # 这里的is_pos的形状依然是[5*27,M]，因为这里的is_pos还没有被展平，后面也被展平了
                 is_pos = is_pos & is_in_gts
 
                 # if an anchor box is assigned to multiple gts, the one with the highest IoU will be selected.
+                # 生成一个和iou形状相同但是值全部是负无穷的张量，转置一下，之后把它也展平
                 ious_inf = torch.full_like(ious, -INF).t().contiguous().view(-1)
+                # 根据 is_pos 提取出 candidate_idxs 中被定义为正样本的anchor的索引 这个地方view不view无所谓，因为前面candidate_idxs就已经被展平了
                 index = candidate_idxs.view(-1)[is_pos.view(-1)]
+                # 将正样本索引处的iou赋值，iou里是多少，这里就是多少
                 ious_inf[index] = ious.t().contiguous().view(-1)[index]
+                # 再改变一下形状 现在 ious_inf 的形状是[N,M] N是anchor的总数目，M是真值的总数目
                 ious_inf = ious_inf.view(num_gt, -1).t()
-
+                # 如果一个anchor被分配给了多个gt，那么取与他iou最大的那个gt
                 anchors_to_gt_values, anchors_to_gt_indexs = ious_inf.max(dim=1)
                 cls_labels_per_im = labels_per_im[anchors_to_gt_indexs]
+                # 其他的anchor一律认为是背景，类别为0
                 cls_labels_per_im[anchors_to_gt_values == -INF] = 0
+                # bboxes_per_im形状是[M,4]存放的是M个真值的边框信息
+                # 注意 和所有gt的iou都是0的anchor，他的 matched_gts 信息记录的是第0个真值框的信息
+                # 这个其实影响不到什么 因为后续背景类是不会参与边框loss的计算的，所以他匹配的真值边框是多少都无所谓
                 matched_gts = bboxes_per_im[anchors_to_gt_indexs]
+
             elif self.cfg.MODEL.ATSS.POSITIVE_TYPE == 'TOPK':
                 gt_cx = (bboxes_per_im[:, 2] + bboxes_per_im[:, 0]) / 2.0
                 gt_cy = (bboxes_per_im[:, 3] + bboxes_per_im[:, 1]) / 2.0

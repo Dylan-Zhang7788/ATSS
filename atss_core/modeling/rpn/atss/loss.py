@@ -80,10 +80,11 @@ class ATSSLossComputation(object):
         cls_labels = []
         reg_targets = []
         for im_i in range(len(targets)):
-            targets_per_im = targets[im_i]
+            targets_per_im = targets[im_i]   # 每张图里的真值样本框的数量 不一定是多少 假设形状是[N,4]
             assert targets_per_im.mode == "xyxy"
             bboxes_per_im = targets_per_im.bbox
             labels_per_im = targets_per_im.get_field("labels")
+            # anchors 5个尺度上的每一个点上都有一个anchor()
             anchors_per_im = cat_boxlist(anchors[im_i])
             num_gt = bboxes_per_im.shape[0]
 
@@ -165,7 +166,7 @@ class ATSSLossComputation(object):
 
                 # Limiting the final positive samples’ center to object
                 anchor_num = anchors_cx_per_im.shape[0]
-                for ng in range(num_gt):
+                for ng in range(num_gt): 
                     candidate_idxs[:, ng] += ng * anchor_num
                 e_anchors_cx = anchors_cx_per_im.view(1, -1).expand(num_gt, anchor_num).contiguous().view(-1)
                 e_anchors_cy = anchors_cy_per_im.view(1, -1).expand(num_gt, anchor_num).contiguous().view(-1)

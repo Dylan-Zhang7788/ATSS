@@ -36,7 +36,10 @@ class AnchorGenerator(nn.Module):
     For a set of image sizes and feature maps, computes a set
     of anchors
     """
-
+    # sizes = new_anchor_sizes = [(64.0,),(128.0,),(256.0,),(512.0,),(1024.0,)]
+    # aspect_ratios = aspect_ratios = (1.0) 
+    # anchor_strides = anchor_strides = (8,16,32,64,128) 
+    # straddle_thresh = straddle_thresh= 0
     def __init__(
         self,
         sizes=(128, 256, 512),
@@ -167,25 +170,27 @@ def make_anchor_generator_retinanet(config):
 
 
 def make_anchor_generator_atss(config):
-    anchor_sizes = config.MODEL.ATSS.ANCHOR_SIZES
-    aspect_ratios = config.MODEL.ATSS.ASPECT_RATIOS
-    anchor_strides = config.MODEL.ATSS.ANCHOR_STRIDES
-    straddle_thresh = config.MODEL.ATSS.STRADDLE_THRESH
-    octave = config.MODEL.ATSS.OCTAVE
-    scales_per_octave = config.MODEL.ATSS.SCALES_PER_OCTAVE
+    anchor_sizes = config.MODEL.ATSS.ANCHOR_SIZES  # (64,128,256,512,1024)
+    aspect_ratios = config.MODEL.ATSS.ASPECT_RATIOS # (1.0)
+    anchor_strides = config.MODEL.ATSS.ANCHOR_STRIDES # (8,16,32,64,128)
+    straddle_thresh = config.MODEL.ATSS.STRADDLE_THRESH # 0
+    octave = config.MODEL.ATSS.OCTAVE # 2.0
+    scales_per_octave = config.MODEL.ATSS.SCALES_PER_OCTAVE # 1
 
     assert len(anchor_strides) == len(anchor_sizes), "Only support FPN now"
     new_anchor_sizes = []
-    for size in anchor_sizes:
+    for size in anchor_sizes: # anchor_sizes = (64,128,256,512,1024)
         per_layer_anchor_sizes = []
-        for scale_per_octave in range(scales_per_octave):
+        for scale_per_octave in range(scales_per_octave): # scales_per_octave = 1
             octave_scale = octave ** (scale_per_octave / float(scales_per_octave))
             per_layer_anchor_sizes.append(octave_scale * size)
         new_anchor_sizes.append(tuple(per_layer_anchor_sizes))
+    # 最后得到的结果：[(64.0,),(128.0,),(256.0,),(512.0,),(1024.0,)]
 
     anchor_generator = AnchorGenerator(
-        tuple(new_anchor_sizes), aspect_ratios, anchor_strides, straddle_thresh
-    )
+        tuple(new_anchor_sizes), aspect_ratios, anchor_strides, straddle_thresh) 
+    # new_anchor_sizes=[(64.0,),(128.0,),(256.0,),(512.0,),(1024.0,)]
+    # aspect_ratios=(1.0) anchor_strides=(8,16,32,64,128) straddle_thresh= 0
     return anchor_generator
 
 # Copyright (c) 2017-present, Facebook, Inc.
